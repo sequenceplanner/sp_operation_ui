@@ -1,8 +1,8 @@
 use futures::future;
 use futures::stream::StreamExt;
 use iced::{
-    button, Alignment, Application, Button, Column, Command, Container, Element, Length, Row,
-    Settings, Subscription, Text,
+    button, scrollable, Alignment, Application, Button, Column, Command, Container, Element, Length, Row,
+    Settings, Subscription, Text, Scrollable
 };
 use iced_native::subscription;
 use r2r;
@@ -37,6 +37,7 @@ enum SPOpViewerState {
     Loaded {
         model_info: SPModelInfo,
         intention_view: bool,
+        scroll: scrollable::State,
         footer: Footer,
     },
     Errored {
@@ -189,6 +190,7 @@ impl Application for SPOpViewer {
                 if let SPOpViewerState::Loaded {
                     model_info: _,
                     intention_view,
+                    scroll: _,
                     footer: _,
                 } = &mut self.ui_state
                 {
@@ -200,6 +202,7 @@ impl Application for SPOpViewer {
                 if let SPOpViewerState::Loaded {
                     model_info: _,
                     intention_view,
+                    scroll: _,
                     footer: _,
                 } = &mut self.ui_state
                 {
@@ -211,6 +214,7 @@ impl Application for SPOpViewer {
                 self.ui_state = SPOpViewerState::Loaded {
                     model_info,
                     intention_view: false,
+                    scroll: scrollable::State::new(),
                     footer: Footer::default(),
                 };
 
@@ -256,12 +260,20 @@ impl Application for SPOpViewer {
             SPOpViewerState::Loaded {
                 model_info,
                 intention_view,
+                scroll,
                 footer,
             } => Column::new()
                 .max_width(500)
                 .spacing(20)
                 .align_items(Alignment::End)
                 .push(model_info.view(&self.state, *intention_view))
+
+                .push(
+                    Scrollable::new(scroll)
+                        .padding(40)
+                        .max_height(400)
+                        .push(Container::new(view_state(&self.state))))
+
                 .push(footer.view()),
             SPOpViewerState::Errored {
                 get_model_button, ..

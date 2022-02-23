@@ -126,3 +126,28 @@ impl SPModelInfo {
             .into()
     }
 }
+
+
+pub(crate) fn view_state_row(path: String, value: String) -> Element<'static, Message> {
+    Row::new()
+        .spacing(20)
+        .push(Column::new()
+              .width(Length::FillPortion(3))
+              .push(Text::new(path).size(10).color([0.3, 0.3, 0.3])))
+        .push(Column::new()
+              .width(Length::FillPortion(1))
+              .push(Text::new(value).size(10).color([0.2, 0.2, 0.2])))
+        .push(Column::new()
+              .width(Length::FillPortion(1))
+              .push(Text::new("edit box here").size(10).color([0.8, 0.2, 0.2])))
+        .into()
+}
+
+pub(crate) fn view_state(state: &SPState) -> Element<Message> {
+    let list_view: Element<_> = state.projection().sorted().state.iter()
+        .fold(Column::new().spacing(5),
+              |col, (k,v)| col.push(
+                  view_state_row(k.to_string(), v.value().to_string()))).into();
+
+    list_view
+}
