@@ -1,5 +1,5 @@
 use iced::{
-    button, Alignment, Button, Column, Element, Length, Row, Text,
+    button, scrollable, Scrollable, Container, Alignment, Button, Column, Element, Length, Row, Text,
 };
 use sp_domain::{SPState, Operation, Intention};
 use sp_formal::CompiledModel;
@@ -106,24 +106,28 @@ impl SPModelInfo {
         }
     }
 
-    pub(crate) fn view(&mut self, state: &SPState, iv: bool) -> Element<Message> {
-        let list_view: Element<_> = if iv {
-            self.intentions
-                .iter_mut()
-                .fold(Column::new().spacing(10), |col, i| col.push(i.view(state)))
-                .into()
-        } else {
-            self.operations
-                .iter_mut()
-                .fold(Column::new().spacing(10), |col, o| col.push(o.view(state)))
-                .into()
-        };
-
-        Row::new()
-            .spacing(20)
-            .align_items(Alignment::Center)
-            .push(Column::new().spacing(20).push(list_view))
+    pub(crate) fn view_ops(&mut self, state: &SPState) -> Element<Message> {
+        self.operations
+            .iter_mut()
+            .fold(Column::new().spacing(10), |col, o| col.push(o.view(state)))
             .into()
+    }
+
+    pub(crate) fn view_ints(&mut self, state: &SPState) -> Element<Message> {
+        self.intentions
+            .iter_mut()
+            .fold(Column::new().spacing(10), |col, i| col.push(i.view(state)))
+            .into()
+    }
+
+    pub(crate) fn view_state<'a>(state: &'a SPState, scroll_state: &'a mut scrollable::State) -> Element<'a, Message> {
+        let state: Element<Message> = state.projection().sorted().state.iter()
+            .fold(Column::new().spacing(5),
+                  |col, (k,v)| col.push(
+                      view_state_row(k.to_string(), v.value().to_string()))).into();
+
+        Scrollable::new(scroll_state)
+                    .push(Container::new(state)).into()
     }
 }
 
@@ -141,13 +145,4 @@ pub(crate) fn view_state_row(path: String, value: String) -> Element<'static, Me
               .width(Length::FillPortion(1))
               .push(Text::new("edit box here").size(10).color([0.8, 0.2, 0.2])))
         .into()
-}
-
-pub(crate) fn view_state(state: &SPState) -> Element<Message> {
-    let list_view: Element<_> = state.projection().sorted().state.iter()
-        .fold(Column::new().spacing(5),
-              |col, (k,v)| col.push(
-                  view_state_row(k.to_string(), v.value().to_string()))).into();
-
-    list_view
 }

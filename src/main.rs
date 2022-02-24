@@ -1,8 +1,8 @@
 use futures::future;
 use futures::stream::StreamExt;
 use iced::{
-    button, scrollable, Alignment, Application, Button, Column, Command, Container, Element, Length, Row,
-    Settings, Subscription, Text, Scrollable
+    window, button, scrollable, Alignment, Application, Button, Column, Command, Container, Element, Length, Row,
+    Settings, Subscription, Text
 };
 use iced_native::subscription;
 use r2r;
@@ -15,7 +15,16 @@ mod components;
 use components::*;
 
 pub fn main() -> iced::Result {
-    SPOpViewer::run(Settings::default())
+    SPOpViewer::run(
+        Settings {
+            antialiasing: true,
+            window: window::Settings {
+                position: window::Position::Centered,
+                size: (500, 600),
+                ..window::Settings::default()
+            },
+            ..Settings::default()
+        })
 }
 
 struct SPOpViewer {
@@ -32,11 +41,18 @@ struct SPOpViewer {
 }
 
 #[derive(Debug, Clone)]
+enum View {
+    OperationView,
+    IntentionView,
+    StateView,
+}
+
+#[derive(Debug, Clone)]
 enum SPOpViewerState {
     Loading,
     Loaded {
         model_info: SPModelInfo,
-        intention_view: bool,
+        current_view: View,
         scroll: scrollable::State,
         footer: Footer,
     },
@@ -49,6 +65,7 @@ enum SPOpViewerState {
 struct Footer {
     op_view_button: button::State,
     int_view_button: button::State,
+    state_view_button: button::State,
     get_model_button: button::State,
 }
 
@@ -56,10 +73,9 @@ impl Footer {
     fn view(&mut self) -> Element<Message> {
         Row::new()
             .spacing(20)
-            .width(Length::Fill)
-            .align_items(Alignment::End)
             .push(button(&mut self.op_view_button, "Operations").on_press(Message::OperationView))
             .push(button(&mut self.int_view_button, "Intentions").on_press(Message::IntentionView))
+            .push(button(&mut self.state_view_button, "State").on_press(Message::StateView))
             .push(button(&mut self.get_model_button, "Get sp model").on_press(Message::UpdateModel))
             .into()
     }
@@ -70,6 +86,7 @@ pub(crate) enum Message {
     Empty, // hmmm
     OperationView,
     IntentionView,
+    StateView,
     ModelUpdate(Result<SPModelInfo, Error>),
     NewState(SPState),
     UpdateModel,
@@ -186,34 +203,46 @@ impl Application for SPOpViewer {
     fn update(&mut self, message: Message) -> Command<Message> {
         match message {
             Message::Empty => Command::none(),
-            Message::OperationView => {
+            Message::StateView => {
                 if let SPOpViewerState::Loaded {
                     model_info: _,
-                    intention_view,
+                    current_view,
                     scroll: _,
                     footer: _,
                 } = &mut self.ui_state
                 {
-                    *intention_view = false;
+                    *current_view = View::StateView;
+                }
+                Command::none()
+            }
+            Message::OperationView => {
+                if let SPOpViewerState::Loaded {
+                    model_info: _,
+                    current_view,
+                    scroll: _,
+                    footer: _,
+                } = &mut self.ui_state
+                {
+                    *current_view = View::OperationView;
                 }
                 Command::none()
             }
             Message::IntentionView => {
                 if let SPOpViewerState::Loaded {
                     model_info: _,
-                    intention_view,
+                    current_view,
                     scroll: _,
                     footer: _,
                 } = &mut self.ui_state
                 {
-                    *intention_view = true;
+                    *current_view = View::IntentionView;
                 }
                 Command::none()
             }
             Message::ModelUpdate(Ok(model_info)) => {
                 self.ui_state = SPOpViewerState::Loaded {
                     model_info,
-                    intention_view: false,
+                    current_view: View::StateView,
                     scroll: scrollable::State::new(),
                     footer: Footer::default(),
                 };
@@ -259,21 +288,20 @@ impl Application for SPOpViewer {
                 .push(Text::new("Waiting for model...").size(40)),
             SPOpViewerState::Loaded {
                 model_info,
-                intention_view,
+                current_view,
                 scroll,
                 footer,
             } => Column::new()
                 .max_width(500)
                 .spacing(20)
-                .align_items(Alignment::End)
-                .push(model_info.view(&self.state, *intention_view))
-
-                .push(
-                    Scrollable::new(scroll)
-                        .padding(40)
-                        .max_height(400)
-                        .push(Container::new(view_state(&self.state))))
-
+                .padding(10)
+                .push(Row::new()
+                      .max_height(500)
+                      .push(match current_view {
+                          View::StateView => SPModelInfo::view_state(&self.state, scroll),
+                          View::OperationView => model_info.view_ops(&self.state),
+                          View::IntentionView => model_info.view_ints(&self.state),
+                      }))
                 .push(footer.view()),
             SPOpViewerState::Errored {
                 get_model_button, ..
