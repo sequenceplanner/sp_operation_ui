@@ -373,6 +373,7 @@ impl SPModelInfo {
                                  filter: &'a str,
                                  scroll_state: &'a mut scrollable::State) -> Element<Message> {
         let matcher = SkimMatcherV2::default().ignore_case();
+        self.state.sort_by(|a,b| a.path.cmp(&b.path));
         let state: Element<Message> = self.state.iter_mut()
             .filter(|si| matcher.fuzzy_match(&si.path.to_string(), filter).is_some())
             .fold(Column::new().spacing(5),
