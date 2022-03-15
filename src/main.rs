@@ -1,7 +1,7 @@
 use futures::future;
 use futures::stream::StreamExt;
 use iced::{
-    window, button, scrollable, text_input, Alignment, Application, Button, Column, Command, Container, Element, Length, Row, Settings, Subscription, Text
+    window, button, scrollable, text_input, Alignment, Application, Button, Column, Command, Container, Element, Length, Row, Settings, Subscription, Text, TextInput
 };
 use iced_native::subscription;
 use r2r;
@@ -19,7 +19,7 @@ pub fn main() -> iced::Result {
             antialiasing: true,
             window: window::Settings {
                 position: window::Position::Centered,
-                size: (600, 700),
+                size: (600, 720),
                 ..window::Settings::default()
             },
             ..Settings::default()
@@ -37,6 +37,10 @@ struct SPOpViewer {
 
     // other state...
     notification: Option<Notification>,
+
+    // global filter textbox
+    filter_string: String,
+    filter_edit_state: text_input::State,
 }
 
 #[derive(Debug, Clone)]
@@ -98,6 +102,7 @@ pub enum Message {
     SetEstimatedCylinders,
     SetNotification(String, NotificationType),
     ClearNotification,
+    FilterChanged(String),
 }
 
 async fn set_state(
@@ -178,6 +183,8 @@ impl Application for SPOpViewer {
                 set_state_client: set_state_client.clone(),
                 ui_state: SPOpViewerState::Loading,
                 notification: None,
+                filter_string: String::new(),
+                filter_edit_state: text_input::State::new(),
             },
             Command::perform(get_model(get_model_client), Message::ModelUpdate),
         )
@@ -216,6 +223,10 @@ impl Application for SPOpViewer {
             }
             Message::ClearNotification => {
                 self.notification = None;
+                Command::none()
+            },
+            Message::FilterChanged(s) => {
+                self.filter_string = s;
                 Command::none()
             },
             Message::StateValueEdit(path, value) => {
@@ -346,7 +357,7 @@ impl Application for SPOpViewer {
             },
             Message::SetEstimatedCylinders => {
                 if let SPOpViewerState::Loaded {
-                    model_info,
+                    model_info: _,
                     current_view: _,
                     scroll: _,
                     footer: _,
@@ -388,9 +399,16 @@ impl Application for SPOpViewer {
                     .spacing(20)
                     .padding(10)
                     .push(Row::new()
+                          .push(
+                              TextInput::new(
+                                  &mut self.filter_edit_state,
+                                  "Filter...",
+                                  &self.filter_string,
+                                  |s| Message::FilterChanged(s))))
+                    .push(Row::new()
                           .height(Length::Units(height))
                           .push(match current_view {
-                              View::StateView => model_info.view_state(scroll),
+                              View::StateView => model_info.view_state(&self.filter_string, scroll),
                               View::OperationView => model_info.view_ops(),
                               View::IntentionView => model_info.view_ints(),
                               View::DemoGoalView => model_info.view_demo_goal(),

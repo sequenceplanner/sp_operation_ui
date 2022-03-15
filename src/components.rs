@@ -6,6 +6,8 @@ use iced::{
 use iced::alignment::{Horizontal, Vertical};
 use sp_domain::{SPPath, SPValue, SPState, Operation, Intention};
 use sp_formal::CompiledModel;
+use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 use crate::Message;
 
 #[derive(Debug, Copy, Clone)]
@@ -367,8 +369,12 @@ impl SPModelInfo {
         col.into()
     }
 
-    pub(crate) fn view_state<'a>(&'a mut self, scroll_state: &'a mut scrollable::State) -> Element<Message> {
+    pub(crate) fn view_state<'a>(&'a mut self,
+                                 filter: &'a str,
+                                 scroll_state: &'a mut scrollable::State) -> Element<Message> {
+        let matcher = SkimMatcherV2::default().ignore_case();
         let state: Element<Message> = self.state.iter_mut()
+            .filter(|si| matcher.fuzzy_match(&si.path.to_string(), filter).is_some())
             .fold(Column::new().spacing(5),
                   |col, si| col.push(
                       view_state_row(si.path.clone(),
