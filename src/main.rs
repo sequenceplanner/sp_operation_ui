@@ -1,8 +1,7 @@
 use futures::future;
 use futures::stream::StreamExt;
 use iced::{
-    window, button, scrollable, Alignment, Application, Button, Column, Command, Container, Element, Length, Row,
-    Settings, Subscription, Text
+    window, button, scrollable, text_input, Alignment, Application, Button, Column, Command, Container, Element, Length, Row, Settings, Subscription, Text
 };
 use iced_native::subscription;
 use r2r;
@@ -20,7 +19,7 @@ pub fn main() -> iced::Result {
             antialiasing: true,
             window: window::Settings {
                 position: window::Position::Centered,
-                size: (500, 600),
+                size: (600, 700),
                 ..window::Settings::default()
             },
             ..Settings::default()
@@ -33,11 +32,11 @@ struct SPOpViewer {
     set_state_client: Arc<Mutex<r2r::Client<r2r::sp_msgs::srv::Json::Service>>>,
     new_state_receiver: Mutex<Option<tokio::sync::mpsc::Receiver<SPState>>>,
 
-    // the sp state
-    state: SPState,
-
     // our ui state
     ui_state: SPOpViewerState,
+
+    // other state...
+    notification: Option<Notification>,
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +44,7 @@ enum View {
     OperationView,
     IntentionView,
     StateView,
+    DemoGoalView,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +67,7 @@ struct Footer {
     int_view_button: button::State,
     state_view_button: button::State,
     get_model_button: button::State,
+    make_goal_button: button::State,
 }
 
 impl Footer {
@@ -77,20 +78,26 @@ impl Footer {
             .push(button(&mut self.int_view_button, "Intentions").on_press(Message::IntentionView))
             .push(button(&mut self.state_view_button, "State").on_press(Message::StateView))
             .push(button(&mut self.get_model_button, "Get sp model").on_press(Message::UpdateModel))
+            .push(button(&mut self.make_goal_button, "Make goal").on_press(Message::DemoGoalView))
             .into()
     }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Message {
+pub enum Message {
     Empty, // hmmm
     OperationView,
     IntentionView,
     StateView,
+    DemoGoalView,
     ModelUpdate(Result<SPModelInfo, Error>),
     NewState(SPState),
+    StateValueEdit(SPPath, String),
     UpdateModel,
     ResetOperation(SPPath),
+    SetEstimatedCylinders,
+    SetNotification(String, NotificationType),
+    ClearNotification,
 }
 
 async fn set_state(
@@ -166,11 +173,11 @@ impl Application for SPOpViewer {
 
         (
             SPOpViewer {
-                state: SPState::new(),
                 new_state_receiver: Mutex::new(Some(receiver)),
                 get_model_client: get_model_client.clone(),
                 set_state_client: set_state_client.clone(),
                 ui_state: SPOpViewerState::Loading,
+                notification: None,
             },
             Command::perform(get_model(get_model_client), Message::ModelUpdate),
         )
@@ -203,6 +210,30 @@ impl Application for SPOpViewer {
     fn update(&mut self, message: Message) -> Command<Message> {
         match message {
             Message::Empty => Command::none(),
+            Message::SetNotification(msg, t) => {
+                self.notification = Some(Notification::new(msg, t));
+                Command::none()
+            }
+            Message::ClearNotification => {
+                self.notification = None;
+                Command::none()
+            },
+            Message::StateValueEdit(path, value) => {
+                if let SPOpViewerState::Loaded {
+                    model_info,
+                    current_view: _,
+                    scroll: _,
+                    footer: _,
+                } = &mut self.ui_state
+                {
+                    match model_info.state.iter_mut().find(|si| si.path == path) {
+                        // TODO use the model to look up the correct type.
+                        Some(ref mut si) => si.new_value = value,
+                        None => (),
+                    }
+                }
+                Command::none()
+            }
             Message::StateView => {
                 if let SPOpViewerState::Loaded {
                     model_info: _,
@@ -239,7 +270,21 @@ impl Application for SPOpViewer {
                 }
                 Command::none()
             }
+            Message::DemoGoalView => {
+                if let SPOpViewerState::Loaded {
+                    model_info: _,
+                    current_view,
+                    scroll: _,
+                    footer: _,
+                } = &mut self.ui_state
+                {
+                    *current_view = View::DemoGoalView;
+                }
+                Command::none()
+            }
             Message::ModelUpdate(Ok(model_info)) => {
+                self.notification = Some(Notification::new("Model loaded!".to_string(),
+                                                           NotificationType::Happy));
                 self.ui_state = SPOpViewerState::Loaded {
                     model_info,
                     current_view: View::StateView,
@@ -257,7 +302,28 @@ impl Application for SPOpViewer {
                 Command::none()
             }
             Message::NewState(s) => {
-                self.state = s;
+                if let SPOpViewerState::Loaded {
+                    model_info,
+                    current_view: _,
+                    scroll: _,
+                    footer: _,
+                } = &mut self.ui_state
+                {
+                    // self.state = s;
+                    let mut new_state = vec![];
+                    for (k,v) in s.projection().state {
+                        match model_info.state.iter_mut().find(|si| &si.path == k) {
+                            Some(ref mut si) => si.value = v.value().clone(),
+                            None => new_state.push(StateInfo {
+                                path: k.clone(),
+                                value: v.value().clone(),
+                                new_value: String::new(),
+                                new_value_state: text_input::State::new(),
+                            }),
+                        }
+                    }
+                    model_info.state.extend(new_state);
+                }
                 Command::none()
             }
             Message::UpdateModel => match self.ui_state {
@@ -275,8 +341,29 @@ impl Application for SPOpViewer {
                 let new_state = SPStateJson::from_state_flat(&new_state);
                 let json = new_state.to_json().to_string();
                 Command::perform(set_state(self.set_state_client.clone(), json), |_| {
-                    Message::Empty
+                    Message::SetNotification("Operation reset!".into(), NotificationType::Sad)
                 })
+            },
+            Message::SetEstimatedCylinders => {
+                if let SPOpViewerState::Loaded {
+                    model_info,
+                    current_view: _,
+                    scroll: _,
+                    footer: _,
+                } = &mut self.ui_state
+                {
+                    let new_state = SPState::new_from_values(&[
+                        (SPPath::from_string("/testpath"), "testvalue".to_spvalue())
+                    ]);
+                    let new_state = SPStateJson::from_state_flat(&new_state);
+                    let json = new_state.to_json().to_string();
+                    Command::perform(set_state(self.set_state_client.clone(), json), |_| {
+                        Message::SetNotification("Updated the state".into(),
+                                                 NotificationType::Neutral)
+                    })
+                } else {
+                    Command::none()
+                }
             }
         }
     }
@@ -291,18 +378,30 @@ impl Application for SPOpViewer {
                 current_view,
                 scroll,
                 footer,
-            } => Column::new()
-                .max_width(500)
-                .spacing(20)
-                .padding(10)
-                .push(Row::new()
-                      .max_height(500)
-                      .push(match current_view {
-                          View::StateView => SPModelInfo::view_state(&self.state, scroll),
-                          View::OperationView => model_info.view_ops(&self.state),
-                          View::IntentionView => model_info.view_ints(&self.state),
-                      }))
-                .push(footer.view()),
+            } => {
+                let height = if self.notification.is_some() {
+                    500
+                } else {
+                    600
+                };
+                let contents = Column::new()
+                    .spacing(20)
+                    .padding(10)
+                    .push(Row::new()
+                          .height(Length::Units(height))
+                          .push(match current_view {
+                              View::StateView => model_info.view_state(scroll),
+                              View::OperationView => model_info.view_ops(),
+                              View::IntentionView => model_info.view_ints(),
+                              View::DemoGoalView => model_info.view_demo_goal(),
+                          }))
+                    .push(footer.view());
+                if let Some(n) = self.notification.as_mut() {
+                    contents.push(n.view())
+                } else {
+                    contents
+                }
+            },
             SPOpViewerState::Errored {
                 get_model_button, ..
             } => Column::new()
@@ -322,7 +421,7 @@ impl Application for SPOpViewer {
 }
 
 #[derive(Debug, Clone)]
-enum Error {
+pub enum Error {
     RosError,
     SerdeError,
 }
@@ -349,7 +448,7 @@ fn button<'a>(state: &'a mut button::State, text: &str) -> Button<'a, Message> {
         .style(style::Button::Primary)
 }
 
-mod style {
+pub(crate) mod style {
     use iced::{button, Background, Color, Vector};
 
     pub enum Button {
