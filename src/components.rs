@@ -8,7 +8,7 @@ use sp_domain::{SPPath, SPValue, SPState, Operation, Intention};
 use sp_formal::CompiledModel;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
-use crate::Message;
+use crate::{Message, BufferLocationType};
 
 #[derive(Debug, Copy, Clone)]
 pub enum NotificationType {
@@ -312,20 +312,22 @@ impl SPModelInfo {
 
     pub(crate) fn view_demo_goal(&mut self) -> Element<Message> {
         let col = Column::new().spacing(10);
-        let col = col.push(Text::new("Create an order").size(20));
-        // grid of 9 buttons to make an "order"
+        let col = col.push(Text::new("Set system state").size(20));
+
         let grid: Element<Message> =
             self.estimated_locations
             .chunks_mut(3)
             .enumerate()
-            .fold(Row::new().spacing(10), |row, (y, bl) | {
+            .fold(Column::new().spacing(10), |row, (y, bl) | {
                 let r = bl.iter_mut().enumerate()
-                    .fold(Column::new().spacing(10), |col, (x, b)| {
-                        let text = format!("{},{}: {}", x, y,
-                                           if b.value { "cylinder" } else
-                                           { "empty" } );
+                    .fold(Row::new().spacing(10), |col, (x, b)| {
+                        let val_str = if b.value { "cylinder" } else { "empty" };
+                        let text = format!("{},{}: {}", x, y, val_str);
+                        let message = Message::BufferButton(
+                            BufferLocationType::Estimated,
+                            y*3+x, !b.value);
                         let button = Button::new(&mut b.button, Text::new(text))
-                            .on_press(Message::Empty);
+                            .on_press(message);
                         col.push(button)
                     });
                 row.push(r)
@@ -336,7 +338,8 @@ impl SPModelInfo {
 
         let button = Button::new(&mut self.update_button, Text::new("Update state"))
             .padding(10)
-            .style(crate::style::Button::Primary);
+            .style(crate::style::Button::Primary)
+            .on_press(Message::SetEstimatedCylinders);
         let col = col.push(button);
 
 
@@ -348,11 +351,16 @@ impl SPModelInfo {
             self.buffers_locations
             .chunks_mut(3)
             .enumerate()
-            .fold(Row::new().spacing(10), |row, (y, bl) | {
+            .fold(Column::new().spacing(10), |row, (y, bl) | {
                 let r = bl.iter_mut().enumerate()
-                    .fold(Column::new().spacing(10), |col, (x, b)| {
-                        let text = format!("{},{}: {}", x, y, "empty");
-                        col.push(Button::new(&mut b.button, Text::new(text)))
+                    .fold(Row::new().spacing(10), |col, (x, b)| {
+                        let val_str = if b.value { "cylinder" } else { "empty" };
+                        let text = format!("{},{}: {}", x, y, val_str);
+                        let message = Message::BufferButton(
+                            BufferLocationType::Goal,
+                            y*3+x, !b.value);
+                        col.push(Button::new(&mut b.button, Text::new(text))
+                                 .on_press(message))
                     });
                 row.push(r)
             })
@@ -363,7 +371,7 @@ impl SPModelInfo {
         let button = Button::new(&mut self.order_button, Text::new("Make order"))
             .padding(10)
             .style(crate::style::Button::Primary)
-            .on_press(Message::SetEstimatedCylinders);
+            .on_press(Message::SendGoalCylinders);
         let col = col.push(button);
 
         col.into()

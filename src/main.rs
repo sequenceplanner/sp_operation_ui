@@ -29,6 +29,7 @@ pub fn main() -> iced::Result {
 struct SPOpViewer {
     // ros communication stuff
     get_model_client: Arc<Mutex<r2r::Client<r2r::sp_msgs::srv::Json::Service>>>,
+    set_model_client: Arc<Mutex<r2r::Client<r2r::sp_msgs::srv::Json::Service>>>,
     set_state_client: Arc<Mutex<r2r::Client<r2r::sp_msgs::srv::Json::Service>>>,
     new_state_receiver: Mutex<Option<tokio::sync::mpsc::Receiver<SPState>>>,
 
@@ -88,6 +89,12 @@ impl Footer {
 }
 
 #[derive(Debug, Clone)]
+pub enum BufferLocationType {
+    Estimated,
+    Goal,
+}
+
+#[derive(Debug, Clone)]
 pub enum Message {
     Empty, // hmmm
     OperationView,
@@ -95,11 +102,13 @@ pub enum Message {
     StateView,
     DemoGoalView,
     ModelUpdate(Result<SPModelInfo, Error>),
+    BufferButton(BufferLocationType, usize, bool),
     NewState(SPState),
     StateValueEdit(SPPath, String),
     UpdateModel,
     ResetOperation(SPPath),
     SetEstimatedCylinders,
+    SendGoalCylinders,
     SetNotification(String, NotificationType),
     ClearNotification,
     FilterChanged(String),
@@ -142,6 +151,24 @@ async fn get_model(
     }
 }
 
+async fn set_model(
+    client: Arc<Mutex<r2r::Client<r2r::sp_msgs::srv::Json::Service>>>,
+    model: Model,
+) -> Result<(), Error> {
+    // let req_msg = r2r::sp_msgs::srv::Json::Request::default();
+    let json = serde_json::to_string(&model).expect("could not serialize");
+    let req_msg = r2r::sp_msgs::srv::Json::Request { json };
+
+    let req = client.lock().unwrap().request(&req_msg)?;
+    let resp = tokio::time::timeout(std::time::Duration::from_secs(1), req).await;
+    if let Ok(Ok(msg)) = resp {
+        println!("msg.json: {}", msg.json);
+        Ok(())
+    } else {
+        return Err(Error::RosError);
+    }
+}
+
 impl Application for SPOpViewer {
     type Executor = iced::executor::Default;
     type Message = Message;
@@ -152,6 +179,10 @@ impl Application for SPOpViewer {
         let mut node = r2r::Node::create(ctx, "sp_op_viewer", "").expect("...");
         let get_model_client = Arc::new(Mutex::new(
             node.create_client::<r2r::sp_msgs::srv::Json::Service>("/sp/get_model")
+                .expect("could not create client"),
+        ));
+        let set_model_client = Arc::new(Mutex::new(
+            node.create_client::<r2r::sp_msgs::srv::Json::Service>("/sp/set_model")
                 .expect("could not create client"),
         ));
         let set_state_client = Arc::new(Mutex::new(
@@ -180,6 +211,7 @@ impl Application for SPOpViewer {
             SPOpViewer {
                 new_state_receiver: Mutex::new(Some(receiver)),
                 get_model_client: get_model_client.clone(),
+                set_model_client: set_model_client.clone(),
                 set_state_client: set_state_client.clone(),
                 ui_state: SPOpViewerState::Loading,
                 notification: None,
@@ -219,7 +251,10 @@ impl Application for SPOpViewer {
             Message::Empty => Command::none(),
             Message::SetNotification(msg, t) => {
                 self.notification = Some(Notification::new(msg, t));
-                Command::none()
+                Command::perform(
+                    tokio::time::sleep(std::time::Duration::from_millis(2500)), |_| {
+                    Message::ClearNotification
+                })
             }
             Message::ClearNotification => {
                 self.notification = None;
@@ -229,6 +264,26 @@ impl Application for SPOpViewer {
                 self.filter_string = s;
                 Command::none()
             },
+            Message::BufferButton(type_, idx, val) => {
+                if let SPOpViewerState::Loaded {
+                    model_info,
+                    current_view: _,
+                    scroll: _,
+                    footer: _,
+                } = &mut self.ui_state
+                {
+                    let bl = match type_ {
+                        BufferLocationType::Estimated => &mut model_info.estimated_locations,
+                        BufferLocationType::Goal => &mut model_info.buffers_locations,
+                    };
+
+                    match bl.get_mut(idx) {
+                        Some(ref mut bl) => bl.value = val,
+                        None => (),
+                    }
+                }
+                Command::none()
+            }
             Message::StateValueEdit(path, value) => {
                 if let SPOpViewerState::Loaded {
                     model_info,
@@ -294,8 +349,6 @@ impl Application for SPOpViewer {
                 Command::none()
             }
             Message::ModelUpdate(Ok(model_info)) => {
-                self.notification = Some(Notification::new("Model loaded!".to_string(),
-                                                           NotificationType::Happy));
                 self.ui_state = SPOpViewerState::Loaded {
                     model_info,
                     current_view: View::StateView,
@@ -303,7 +356,14 @@ impl Application for SPOpViewer {
                     footer: Footer::default(),
                 };
 
-                Command::none()
+                // hack... dont know how to send again here
+                self.notification = Some(Notification::new("Model loaded!".to_string(),
+                                                           NotificationType::Happy));
+                Command::perform(
+                    tokio::time::sleep(std::time::Duration::from_millis(2500)), |_| {
+                    Message::ClearNotification
+                })
+
             }
             Message::ModelUpdate(Err(_error)) => {
                 self.ui_state = SPOpViewerState::Errored {
@@ -357,20 +417,60 @@ impl Application for SPOpViewer {
             },
             Message::SetEstimatedCylinders => {
                 if let SPOpViewerState::Loaded {
-                    model_info: _,
+                    model_info,
                     current_view: _,
                     scroll: _,
                     footer: _,
                 } = &mut self.ui_state
                 {
-                    let new_state = SPState::new_from_values(&[
-                        (SPPath::from_string("/testpath"), "testvalue".to_spvalue())
-                    ]);
+                    let updated_state: Vec<_> = model_info.estimated_locations
+                        .iter()
+                        .enumerate()
+                        .map(|(i, bi)| {
+                            let prefix = "lab_scenario_1/product_state";
+                            let path = SPPath::from_string(&format!("{}/buffer{}",prefix,i+1));
+                            (path, bi.value.to_spvalue())
+                        }).collect();
+
+                    let new_state = SPState::new_from_values(&updated_state);
                     let new_state = SPStateJson::from_state_flat(&new_state);
                     let json = new_state.to_json().to_string();
                     Command::perform(set_state(self.set_state_client.clone(), json), |_| {
                         Message::SetNotification("Updated the state".into(),
                                                  NotificationType::Neutral)
+                    })
+                } else {
+                    Command::none()
+                }
+            },
+            Message::SendGoalCylinders => {
+                if let SPOpViewerState::Loaded {
+                    model_info,
+                    current_view: _,
+                    scroll: _,
+                    footer: _,
+                } = &mut self.ui_state
+                {
+                    let predicate: Vec<_> = model_info.buffers_locations
+                        .iter()
+                        .enumerate()
+                        .map(|(i, bi)| {
+                            let prefix = "lab_scenario_1/product_state";
+                            let path = SPPath::from_string(&format!("{}/buffer{}",prefix,i+1));
+
+                            Predicate::EQ(PredicateValue::SPPath(path, None),
+                                          PredicateValue::SPValue(bi.value.to_spvalue()))
+                        }).collect();
+                    let post = Predicate::AND(predicate);
+                    let mut model = Model::new("lab_scenario_1");
+                        model.add_intention("test_intention", false,
+                                            &Predicate::TRUE,
+                                            &post,
+                                            &[]);
+                    Command::perform(set_model(self.set_model_client.clone(), model), move |_| {
+                        Message::SetNotification(//"Updated the state".into(),
+                            format!("new intention: {}", post),
+                            NotificationType::Neutral)
                     })
                 } else {
                     Command::none()
