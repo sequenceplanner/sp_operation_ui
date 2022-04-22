@@ -4,7 +4,7 @@ use iced::{
     Alignment, Button, Column, Element, Length, Row, Text, TextInput
 };
 use iced::alignment::{Horizontal, Vertical};
-use sp_domain::{SPPath, SPValue, SPState, Operation, Intention};
+use sp_domain::*;
 use sp_formal::CompiledModel;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -199,6 +199,7 @@ pub struct BufferLocation {
 
 #[derive(Debug, Clone, Default)]
 pub struct SPModelInfo {
+    pub compiled_model: CompiledModel,
     pub state: Vec<StateInfo>,
     pub operations: Vec<OperationInfo>,
     pub intentions: Vec<IntentionInfo>,
@@ -255,6 +256,11 @@ impl IntentionInfo {
 }
 
 impl SPModelInfo {
+    pub(crate) fn get_spstate(&self) -> SPState {
+        let state: Vec<_> = self.state.iter().map(|si| (si.path.clone(), si.value.clone())).collect();
+        SPState::new_from_values(&state)
+    }
+
     pub(crate) fn from(compiled_model: CompiledModel) -> SPModelInfo {
         let operations = compiled_model
             .model
@@ -276,6 +282,7 @@ impl SPModelInfo {
             .collect();
 
         SPModelInfo {
+            compiled_model,
             state: vec![],
             operations,
             intentions,
@@ -308,6 +315,129 @@ impl SPModelInfo {
                 col.push(i.view(&state_value))
             })
             .into()
+    }
+
+    pub(crate) fn view_tplan(&mut self) -> Element<Message> {
+        // temp hack to get transitions, move this out later.
+        let model = &self.compiled_model.model;
+        let mut transitions: Vec<Transition> = model.resources
+            .iter()
+            .flat_map(|r| r.transitions.clone())
+            .collect();
+
+        let global_transitions = model.global_transitions.clone();
+        transitions.extend(global_transitions);
+        // end temp hack
+
+        let goal_p = SPPath::from_slice(&["runner", "transition_goal"]);
+        let goal_str = self.state.iter()
+            .find(|si| si.path == goal_p)
+            .map(|si| si.value.to_string()).unwrap_or("no goal".to_string());
+
+        let plan_idx = self.state.iter().find_map(|si| {
+            if si.path == SPPath::from_slice(&["runner", "plans", "0"]) {
+                if let SPValue::Int32(idx) = &si.value {
+                    return Some(*idx);
+                }
+            }
+            None
+        }).unwrap_or(0);
+
+        let p_path = SPPath::from_slice(&["runner", "transition_plan"]);
+        let paths = self.state.iter().find_map(|si| {
+            if si.path == p_path {
+                if let SPValue::Array(SPValueType::Path, v) = &si.value {
+                    Some(v.iter().map(|e| e.to_string()).collect())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }).unwrap_or(vec![]);
+
+        let mut idx = 0;
+        let mut path_info = vec![];
+        for p in paths {
+            let trans = transitions.iter().find(|t| t.path().to_string() == p);
+            if let Some(trans) = &trans {
+                if trans.type_ == TransitionType::Controlled {
+                    idx+=1;
+                }
+            }
+            path_info.push((p, trans, idx));
+        }
+
+        let s = self.get_spstate();
+
+        let plan_cols: Element<Message> = path_info
+            .iter()
+            .fold(Column::new().spacing(10), |col, (path, trans, idx)| {
+                let mut guard = false;
+                let mut runner_guard = false;
+                let color = match trans {
+                    Some(trans) if trans.type_ == TransitionType::Controlled => {
+                        if idx > &plan_idx {
+                            guard = trans.guard.eval(&s);
+                            runner_guard = trans.runner_guard.eval(&s);
+                            [0.3, 0.3, 0.3] // later in plan
+                        } else if idx == &plan_idx {
+                            [0.0, 0.0, 0.5] // just started
+                        } else {
+                            [0.0, 0.5, 0.0] // already done
+                        }
+                    },
+                    Some(_) => [0.5, 0.5, 0.5], // effects are shaded
+                    None => [0.8, 0.8, 0.8], // trans does not exist
+                };
+
+                let guard_str = format!("g: {} / rg: {}", guard, runner_guard);
+                col.push(
+                    Row::new()
+                        .push(Column::new().width(Length::FillPortion(3))
+                              .push(Text::new(path).color(color)))
+                        .push(Column::new().width(Length::FillPortion(1))
+                              .push(Text::new(guard_str).color(color))))
+            })
+            .into();
+
+        Column::new()
+            .height(Length::Fill)
+            .spacing(20)
+            .push(Text::new(goal_str).size(30))
+            .push(Column::new().push(plan_cols)).into()
+    }
+
+    pub(crate) fn view_oplan(&mut self) -> Element<Message> {
+        let goal_p = SPPath::from_slice(&["runner", "operation_goal"]);
+        let goal_str = self.state.iter()
+            .find(|si| si.path == goal_p)
+            .map(|si| si.value.to_string()).unwrap_or("no goal".to_string());
+
+        let p_path = SPPath::from_slice(&["runner", "operation_plan"]);
+        let paths = self.state.iter().find_map(|si| {
+            if si.path == p_path {
+                if let SPValue::Array(SPValueType::Path, v) = &si.value {
+                    Some(v.iter().map(|e| e.to_string()).collect())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }).unwrap_or(vec![]);
+        let plan_cols: Element<Message> = paths
+            .iter()
+            .fold(Column::new().spacing(10), |col, path| {
+                col.push(Text::new(path))
+            })
+            .into();
+
+        Column::new()
+            .height(Length::Fill)
+            .spacing(20)
+            .push(Text::new(goal_str).size(30))
+            .push(Column::new().push(plan_cols)).into()
     }
 
     pub(crate) fn view_demo_goal(&mut self) -> Element<Message> {
@@ -403,10 +533,10 @@ pub(crate) fn view_state_row<'a>(path: SPPath, value: String,
         .spacing(20)
         .push(Column::new()
               .width(Length::FillPortion(3))
-              .push(Text::new(path.to_string()).size(10).color([0.3, 0.3, 0.3])))
+              .push(Text::new(path.to_string()).size(16).color([0.3, 0.3, 0.3])))
         .push(Column::new()
               .width(Length::FillPortion(1))
-              .push(Text::new(&value).size(10).color([0.2, 0.2, 0.2])))
+              .push(Text::new(&value).size(16).height(Length::Units(30)).color([0.2, 0.2, 0.2])))
         .push(
             TextInput::new(
                 text_state,

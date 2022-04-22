@@ -19,7 +19,7 @@ pub fn main() -> iced::Result {
             antialiasing: true,
             window: window::Settings {
                 position: window::Position::Centered,
-                size: (600, 720),
+                size: (750, 720),
                 ..window::Settings::default()
             },
             ..Settings::default()
@@ -45,9 +45,11 @@ struct SPOpViewer {
 }
 
 #[derive(Debug, Clone)]
-enum View {
+pub enum View {
     OperationView,
     IntentionView,
+    TPlanView,
+    OPlanView,
     StateView,
     DemoGoalView,
 }
@@ -70,6 +72,8 @@ enum SPOpViewerState {
 struct Footer {
     op_view_button: button::State,
     int_view_button: button::State,
+    tplan_view_button: button::State,
+    oplan_view_button: button::State,
     state_view_button: button::State,
     get_model_button: button::State,
     make_goal_button: button::State,
@@ -79,11 +83,20 @@ impl Footer {
     fn view(&mut self) -> Element<Message> {
         Row::new()
             .spacing(20)
-            .push(button(&mut self.op_view_button, "Operations").on_press(Message::OperationView))
-            .push(button(&mut self.int_view_button, "Intentions").on_press(Message::IntentionView))
-            .push(button(&mut self.state_view_button, "State").on_press(Message::StateView))
-            .push(button(&mut self.get_model_button, "Get sp model").on_press(Message::UpdateModel))
-            .push(button(&mut self.make_goal_button, "Make goal").on_press(Message::DemoGoalView))
+            .push(button(&mut self.int_view_button, "Intentions")
+                  .on_press(Message::ChangeView(View::IntentionView)))
+            .push(button(&mut self.oplan_view_button, "O. Plan")
+                  .on_press(Message::ChangeView(View::OPlanView)))
+            .push(button(&mut self.op_view_button, "Operations")
+                  .on_press(Message::ChangeView(View::OperationView)))
+            .push(button(&mut self.tplan_view_button, "T. Plan")
+                  .on_press(Message::ChangeView(View::TPlanView)))
+            .push(button(&mut self.state_view_button, "State")
+                  .on_press(Message::ChangeView(View::StateView)))
+            .push(button(&mut self.make_goal_button, "Make goal")
+                  .on_press(Message::ChangeView(View::DemoGoalView)))
+            .push(button(&mut self.get_model_button, "Get sp model")
+                  .on_press(Message::UpdateModel))
             .into()
     }
 }
@@ -97,10 +110,7 @@ pub enum BufferLocationType {
 #[derive(Debug, Clone)]
 pub enum Message {
     Empty, // hmmm
-    OperationView,
-    IntentionView,
-    StateView,
-    DemoGoalView,
+    ChangeView(View),
     ModelUpdate(Result<SPModelInfo, Error>),
     BufferButton(BufferLocationType, usize, bool),
     NewState(SPState),
@@ -190,7 +200,7 @@ impl Application for SPOpViewer {
                 .expect("could not create client"),
         ));
         let sub = node
-            .subscribe::<r2r::std_msgs::msg::String>("/sp/state", r2r::QosProfile::default())
+            .subscribe::<r2r::std_msgs::msg::String>("/sp/state_flat", r2r::QosProfile::default())
             .expect("could not subscribe");
 
         let _handle = std::thread::spawn(move || loop {
@@ -300,7 +310,7 @@ impl Application for SPOpViewer {
                 }
                 Command::none()
             }
-            Message::StateView => {
+            Message::ChangeView(view) => {
                 if let SPOpViewerState::Loaded {
                     model_info: _,
                     current_view,
@@ -308,43 +318,7 @@ impl Application for SPOpViewer {
                     footer: _,
                 } = &mut self.ui_state
                 {
-                    *current_view = View::StateView;
-                }
-                Command::none()
-            }
-            Message::OperationView => {
-                if let SPOpViewerState::Loaded {
-                    model_info: _,
-                    current_view,
-                    scroll: _,
-                    footer: _,
-                } = &mut self.ui_state
-                {
-                    *current_view = View::OperationView;
-                }
-                Command::none()
-            }
-            Message::IntentionView => {
-                if let SPOpViewerState::Loaded {
-                    model_info: _,
-                    current_view,
-                    scroll: _,
-                    footer: _,
-                } = &mut self.ui_state
-                {
-                    *current_view = View::IntentionView;
-                }
-                Command::none()
-            }
-            Message::DemoGoalView => {
-                if let SPOpViewerState::Loaded {
-                    model_info: _,
-                    current_view,
-                    scroll: _,
-                    footer: _,
-                } = &mut self.ui_state
-                {
-                    *current_view = View::DemoGoalView;
+                    *current_view = view;
                 }
                 Command::none()
             }
@@ -511,6 +485,8 @@ impl Application for SPOpViewer {
                               View::StateView => model_info.view_state(&self.filter_string, scroll),
                               View::OperationView => model_info.view_ops(),
                               View::IntentionView => model_info.view_ints(),
+                              View::TPlanView => model_info.view_tplan(),
+                              View::OPlanView => model_info.view_oplan(),
                               View::DemoGoalView => model_info.view_demo_goal(),
                           }))
                     .push(footer.view());
@@ -562,7 +538,7 @@ impl From<serde_json::Error> for Error {
 
 fn button<'a>(state: &'a mut button::State, text: &str) -> Button<'a, Message> {
     Button::new(state, Text::new(text))
-        .padding(10)
+        .padding(8)
         .style(style::Button::Primary)
 }
 
@@ -579,7 +555,7 @@ pub(crate) mod style {
                 background: Some(Background::Color(match self {
                     Button::Primary => Color::from_rgb(0.11, 0.42, 0.87),
                 })),
-                border_radius: 12.0,
+                border_radius: 4.0,
                 shadow_offset: Vector::new(1.0, 1.0),
                 text_color: Color::WHITE,
                 ..button::Style::default()

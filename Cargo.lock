@@ -2001,7 +2001,7 @@ dependencies = [
 [[package]]
 name = "sp-domain"
 version = "0.1.0"
-source = "git+https://github.com/sequenceplanner/sp-rust?branch=runner_actions#6e037f407d571bafe3a2c49e32d32786ba432d9f"
+source = "git+https://github.com/sequenceplanner/sp-rust?branch=improved_macros#50c4e0b0142ebec95ec184d98d3eb5622dd92821"
 dependencies = [
  "peg",
  "rand",
@@ -2013,7 +2013,7 @@ dependencies = [
 [[package]]
 name = "sp-formal"
 version = "0.1.0"
-source = "git+https://github.com/sequenceplanner/sp-rust?branch=runner_actions#6e037f407d571bafe3a2c49e32d32786ba432d9f"
+source = "git+https://github.com/sequenceplanner/sp-rust?branch=improved_macros#50c4e0b0142ebec95ec184d98d3eb5622dd92821"
 dependencies = [
  "futures",
  "rayon",
