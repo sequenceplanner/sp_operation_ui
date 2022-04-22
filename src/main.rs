@@ -116,7 +116,7 @@ pub enum Message {
     NewState(SPState),
     StateValueEdit(SPPath, String),
     UpdateModel,
-    ResetOperation(SPPath),
+    ResetOperation(SPPath, SPValue),
     SetEstimatedCylinders,
     SendGoalCylinders,
     SetNotification(String, NotificationType),
@@ -381,12 +381,13 @@ impl Application for SPOpViewer {
                     )
                 }
             },
-            Message::ResetOperation(path) => {
-                let new_state = SPState::new_from_values(&[(path, "i".to_spvalue())]);
+            Message::ResetOperation(path, change_to) => {
+                let new_state = SPState::new_from_values(&[(path.clone(), change_to.clone())]);
                 let new_state = SPStateJson::from_state_flat(&new_state);
                 let json = new_state.to_json().to_string();
-                Command::perform(set_state(self.set_state_client.clone(), json), |_| {
-                    Message::SetNotification("Operation reset!".into(), NotificationType::Sad)
+                Command::perform(set_state(self.set_state_client.clone(), json), move |_| {
+                    Message::SetNotification(format!("{} set to {}!", path, change_to),
+                                             NotificationType::Happy)
                 })
             },
             Message::SetEstimatedCylinders => {

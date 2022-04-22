@@ -174,12 +174,15 @@ impl button::StyleSheet for SadNotificationStyle {
 #[derive(Debug, Clone)]
 pub struct OperationInfo {
     pub op: Operation,
+    pub start_button_state: button::State,
     pub reset_button_state: button::State,
 }
 
 #[derive(Debug, Clone)]
 pub struct IntentionInfo {
     pub i: Intention,
+    pub stop_button_state: button::State,
+    pub start_button_state: button::State,
     pub reset_button_state: button::State,
 }
 
@@ -226,9 +229,14 @@ impl OperationInfo {
             )
             .push(Text::new(state_value).size(20).color([0.2, 0.2, 0.2]))
             .push(
-                Button::new(&mut self.reset_button_state, Text::new("Reset").size(12))
+                Button::new(&mut self.start_button_state, Text::new("Force start").size(10))
                     .padding(10)
-                    .on_press(Message::ResetOperation(self.op.path.clone())),
+                    .on_press(Message::ResetOperation(self.op.path.clone(), "e".to_spvalue())),
+            )
+            .push(
+                Button::new(&mut self.reset_button_state, Text::new("Reset").size(10))
+                    .padding(10)
+                    .on_press(Message::ResetOperation(self.op.path.clone(), "i".to_spvalue())),
             )
             .into()
     }
@@ -246,11 +254,15 @@ impl IntentionInfo {
                     .color([0.5, 0.5, 0.5]),
             )
             .push(Text::new(state_value).size(20).color([0.2, 0.2, 0.2]))
-            .push(
-                Button::new(&mut self.reset_button_state, Text::new("Reset"))
-                    .padding(10)
-                    .on_press(Message::ResetOperation(self.i.path.clone())),
-            )
+            .push(Button::new(&mut self.stop_button_state, Text::new("Stop").size(10))
+                              .padding(10)
+                              .on_press(Message::ResetOperation(self.i.path.clone(), "X".to_spvalue())))
+            .push(Button::new(&mut self.start_button_state, Text::new("Force start").size(10))
+                              .padding(10)
+                              .on_press(Message::ResetOperation(self.i.path.clone(), "e".to_spvalue())))
+            .push(Button::new(&mut self.reset_button_state, Text::new("Reset").size(10))
+                              .padding(10)
+                              .on_press(Message::ResetOperation(self.i.path.clone(), "i".to_spvalue())))
             .into()
     }
 }
@@ -268,6 +280,7 @@ impl SPModelInfo {
             .iter()
             .map(|o| OperationInfo {
                 op: o.clone(),
+                start_button_state: button::State::new(),
                 reset_button_state: button::State::new(),
             })
             .collect();
@@ -277,6 +290,8 @@ impl SPModelInfo {
             .iter()
             .map(|i| IntentionInfo {
                 i: i.clone(),
+                stop_button_state: button::State::new(),
+                start_button_state: button::State::new(),
                 reset_button_state: button::State::new(),
             })
             .collect();
@@ -375,11 +390,13 @@ impl SPModelInfo {
             .fold(Column::new().spacing(10), |col, (path, trans, idx)| {
                 let mut guard = false;
                 let mut runner_guard = false;
+                let mut show_guards = false;
                 let color = match trans {
                     Some(trans) if trans.type_ == TransitionType::Controlled => {
                         if idx > &plan_idx {
                             guard = trans.guard.eval(&s);
                             runner_guard = trans.runner_guard.eval(&s);
+                            show_guards = true;
                             [0.3, 0.3, 0.3] // later in plan
                         } else if idx == &plan_idx {
                             [0.0, 0.0, 0.5] // just started
@@ -391,7 +408,11 @@ impl SPModelInfo {
                     None => [0.8, 0.8, 0.8], // trans does not exist
                 };
 
-                let guard_str = format!("g: {} / rg: {}", guard, runner_guard);
+                let guard_str = if show_guards {
+                    format!("g: {} / rg: {}", guard, runner_guard)
+                } else {
+                    String::new()
+                };
                 col.push(
                     Row::new()
                         .push(Column::new().width(Length::FillPortion(3))
@@ -402,8 +423,7 @@ impl SPModelInfo {
             .into();
 
         Column::new()
-            .height(Length::Fill)
-            .spacing(20)
+            .spacing(5)
             .push(Text::new(goal_str).size(30))
             .push(Column::new().push(plan_cols)).into()
     }
