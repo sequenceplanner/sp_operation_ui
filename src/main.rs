@@ -172,7 +172,6 @@ async fn set_model(
     let req = client.lock().unwrap().request(&req_msg)?;
     let resp = tokio::time::timeout(std::time::Duration::from_secs(1), req).await;
     if let Ok(Ok(msg)) = resp {
-        println!("msg.json: {}", msg.json);
         Ok(())
     } else {
         return Err(Error::RosError);
@@ -403,7 +402,7 @@ impl Application for SPOpViewer {
                         .enumerate()
                         .map(|(i, bi)| {
                             let prefix = "lab_scenario_1/product_state";
-                            let path = SPPath::from_string(&format!("{}/buffer{}",prefix,i+1));
+                            let path = SPPath::from_string(&format!("{}/buffer_{}",prefix,i+1));
                             (path, bi.value.to_spvalue())
                         }).collect();
 
@@ -431,7 +430,7 @@ impl Application for SPOpViewer {
                         .enumerate()
                         .map(|(i, bi)| {
                             let prefix = "lab_scenario_1/product_state";
-                            let path = SPPath::from_string(&format!("{}/buffer{}",prefix,i+1));
+                            let path = SPPath::from_string(&format!("{}/buffer_{}",prefix,i+1));
 
                             Predicate::EQ(PredicateValue::SPPath(path, None),
                                           PredicateValue::SPValue(bi.value.to_spvalue()))

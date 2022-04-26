@@ -10,6 +10,9 @@ use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use crate::{Message, BufferLocationType};
 
+// SIDExSIDE buffer view for goal generation.
+static NUM_BUFFERS_SIDE: usize = 2;
+
 #[derive(Debug, Copy, Clone)]
 pub enum NotificationType {
     Happy,
@@ -296,13 +299,14 @@ impl SPModelInfo {
             })
             .collect();
 
+        let num_buffers = NUM_BUFFERS_SIDE * NUM_BUFFERS_SIDE;
         SPModelInfo {
             compiled_model,
             state: vec![],
             operations,
             intentions,
-            buffers_locations: (0..9).map(|_| BufferLocation::default()).collect(),
-            estimated_locations: (0..9).map(|_| BufferLocation::default()).collect(),
+            buffers_locations: (0..num_buffers).map(|_| BufferLocation::default()).collect(),
+            estimated_locations: (0..num_buffers).map(|_| BufferLocation::default()).collect(),
             order_button: button::State::default(),
             update_button: button::State::default(),
         }
@@ -466,7 +470,7 @@ impl SPModelInfo {
 
         let grid: Element<Message> =
             self.estimated_locations
-            .chunks_mut(3)
+            .chunks_mut(NUM_BUFFERS_SIDE)
             .enumerate()
             .fold(Column::new().spacing(10), |row, (y, bl) | {
                 let r = bl.iter_mut().enumerate()
@@ -475,7 +479,7 @@ impl SPModelInfo {
                         let text = format!("{},{}: {}", x, y, val_str);
                         let message = Message::BufferButton(
                             BufferLocationType::Estimated,
-                            y*3+x, !b.value);
+                            y*NUM_BUFFERS_SIDE+x, !b.value);
                         let button = Button::new(&mut b.button, Text::new(text))
                             .on_press(message);
                         col.push(button)
@@ -496,10 +500,10 @@ impl SPModelInfo {
         ///////////////
 
         let col = col.push(Text::new("Create an order").size(20));
-        // grid of 9 buttons to make an "order"
+
         let grid: Element<Message> =
             self.buffers_locations
-            .chunks_mut(3)
+            .chunks_mut(NUM_BUFFERS_SIDE)
             .enumerate()
             .fold(Column::new().spacing(10), |row, (y, bl) | {
                 let r = bl.iter_mut().enumerate()
@@ -508,7 +512,7 @@ impl SPModelInfo {
                         let text = format!("{},{}: {}", x, y, val_str);
                         let message = Message::BufferButton(
                             BufferLocationType::Goal,
-                            y*3+x, !b.value);
+                            y*NUM_BUFFERS_SIDE+x, !b.value);
                         col.push(Button::new(&mut b.button, Text::new(text))
                                  .on_press(message))
                     });
